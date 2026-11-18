@@ -38,6 +38,7 @@ public class RenatusApiClient
 	private static final Type LEADERBOARD_TYPE = new TypeToken<List<LeaderboardEntry>>() {}.getType();
 	private static final Type SPLITS_TYPE = new TypeToken<List<Split>>() {}.getType();
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+	private static final String USER_AGENT = "renatus-pvm (+https://github.com/PhyrWall/Renatus-PVM-Plugin)";
 
 	private final OkHttpClient httpClient;
 	private final Gson gson;
@@ -181,6 +182,7 @@ public class RenatusApiClient
 		path.accept(builder);
 		Request.Builder requestBuilder = new Request.Builder()
 			.url(builder.build())
+			.header("User-Agent", USER_AGENT)
 			.header("Authorization", "Bearer " + config.apiKey().trim());
 		method.accept(requestBuilder);
 		Request request = requestBuilder.build();
