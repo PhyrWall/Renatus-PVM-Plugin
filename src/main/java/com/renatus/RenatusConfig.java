@@ -30,7 +30,7 @@ public interface RenatusConfig extends Config
 	)
 	default String apiBaseUrl()
 	{
-		return "";
+		return "https://renatus-pvm.com";
 	}
 
 	@ConfigItem(
