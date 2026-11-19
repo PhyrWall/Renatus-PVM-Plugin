@@ -72,6 +72,8 @@ class RenatusPanel extends PluginPanel
 	private List<Rank> ranks = Collections.emptyList();
 	// Profile splits whose participant list is open; kept across refreshes.
 	private final Set<String> expandedSplits = new HashSet<>();
+	// Set when loading failed; drops late results until the next load starts.
+	private boolean loadFailed;
 
 	@Inject
 	RenatusPanel(ItemManager itemManager)
@@ -101,8 +103,6 @@ class RenatusPanel extends PluginPanel
 
 		messageLabel.setForeground(MUTED);
 		messageLabel.setFont(FontManager.getRunescapeSmallFont());
-		messageLabel.setVisible(false);
-		add(messageLabel);
 
 		searchField.setIcon(IconTextField.Icon.SEARCH);
 		searchField.setPreferredSize(new Dimension(PANEL_WIDTH - 20, 30));
@@ -144,6 +144,10 @@ class RenatusPanel extends PluginPanel
 
 	void showSetup(RenatusApiClient.SetupState state)
 	{
+		if (state != RenatusApiClient.SetupState.READY)
+		{
+			clearData();
+		}
 		switch (state)
 		{
 			case DISABLED:
@@ -160,20 +164,72 @@ class RenatusPanel extends PluginPanel
 	void showMessage(String message)
 	{
 		messageLabel.setText("<html>" + escape(message) + "</html>");
-		messageLabel.setVisible(true);
+		if (messageLabel.getParent() != this)
+		{
+			add(messageLabel, 1); // directly under the header
+		}
 		revalidate();
+		repaint();
 	}
 
 	void clearMessage()
 	{
-		messageLabel.setVisible(false);
+		if (messageLabel.getParent() == this)
+		{
+			remove(messageLabel);
+			revalidate();
+			repaint();
+		}
+	}
+
+	// -- load state -----------------------------------------------------------
+
+	/** Starts a fresh load: data from the server is accepted again. */
+	void beginLoad()
+	{
+		loadFailed = false;
+	}
+
+	/**
+	 * Loading data failed (bad API key, server down...): empty every section
+	 * and show why. Results from the same load that arrive later are dropped
+	 * so the panel doesn't half-fill.
+	 */
+	void loadFailed(String message)
+	{
+		loadFailed = true;
+		clearData();
+		showMessage(message);
+	}
+
+	/** Empties the profile, clan stats, and the leaderboard, recent and ranks tabs. */
+	void clearData()
+	{
+		ownProfile = null;
+		ownLoaded = false;
+		lookupName = null;
+		lookupProfile = null;
+		ranks = Collections.emptyList();
+		expandedSplits.clear();
+		searchField.setText("");
+
+		clanPanel.removeAll();
+		leaderboardList.removeAll();
+		recentList.removeAll();
+		renderProfile();
+		renderRanks();
 		revalidate();
+		repaint();
 	}
 
 	// -- data setters ---------------------------------------------------------
 
 	void setOwnProfile(@Nullable PlayerProfile profile)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		ownProfile = profile;
 		ownLoaded = true;
 		if (lookupName == null)
@@ -191,6 +247,10 @@ class RenatusPanel extends PluginPanel
 
 	void setClan(@Nullable ClanSummary clan)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		clanPanel.removeAll();
 		if (clan != null)
 		{
@@ -207,6 +267,10 @@ class RenatusPanel extends PluginPanel
 
 	void setLeaderboard(@Nullable List<LeaderboardEntry> entries)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		leaderboardList.removeAll();
 		if (entries != null)
 		{
@@ -228,6 +292,10 @@ class RenatusPanel extends PluginPanel
 
 	void setRecentSplits(@Nullable List<Split> splits)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		recentList.removeAll();
 		if (splits != null)
 		{
