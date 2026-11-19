@@ -23,22 +23,11 @@ public interface RenatusConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "apiBaseUrl",
-		name = "Clan server URL",
-		description = "Address of the Renatus clan website. Check Discord for instructions.",
-		position = 1
-	)
-	default String apiBaseUrl()
-	{
-		return "https://renatus-pvm.com";
-	}
-
-	@ConfigItem(
 		keyName = "apiKey",
 		name = "API key",
 		description = "Your personal key: run /get-api-key in the Renatus Discord and paste it here",
 		secret = true,
-		position = 2
+		position = 1
 	)
 	default String apiKey()
 	{
@@ -49,7 +38,7 @@ public interface RenatusConfig extends Config
 		keyName = "pendingReminder",
 		name = "Pending split reminder",
 		description = "On login, remind you of splits you've been tagged in but haven't confirmed in Discord yet",
-		position = 4
+		position = 3
 	)
 	default boolean pendingReminder()
 	{
@@ -59,8 +48,8 @@ public interface RenatusConfig extends Config
 	@ConfigItem(
 		keyName = "newSplitAlert",
 		name = "New split alert",
-		description = "Chat message and notification when someone tags you in a new split to confirm (checked every minute while logged in)",
-		position = 5
+		description = "Chat message and notification when someone tags you in a new split to confirm (checked every 5 minutes while logged in)",
+		position = 4
 	)
 	default boolean newSplitAlert()
 	{
@@ -71,7 +60,7 @@ public interface RenatusConfig extends Config
 		keyName = "pendingInfoBox",
 		name = "Pending split info box",
 		description = "Show an info box with the number of splits waiting for your confirmation",
-		position = 6
+		position = 5
 	)
 	default boolean pendingInfoBox()
 	{
@@ -83,7 +72,7 @@ public interface RenatusConfig extends Config
 		keyName = "leaderboardSize",
 		name = "Leaderboard size",
 		description = "How many members to show on the leaderboard tab",
-		position = 7
+		position = 6
 	)
 	default int leaderboardSize()
 	{

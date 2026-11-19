@@ -149,9 +149,6 @@ class RenatusPanel extends PluginPanel
 			case DISABLED:
 				showMessage("Enable \"Connect to clan server\" in the plugin config.");
 				break;
-			case NO_URL:
-				showMessage("Set the clan server URL in the plugin config.");
-				break;
 			case NO_KEY:
 				showMessage("Run /get-api-key in the Renatus Discord and paste the key into the plugin config.");
 				break;
@@ -386,7 +383,6 @@ class RenatusPanel extends PluginPanel
 
 	// -- component helpers ----------------------------------------------------
 
-	/** Red-bordered box listing splits waiting on the user */
 	/** Right-click menu on a pending split: confirm/deny or copy its code. */
 	private JPopupMenu responseMenu(Split split, String code)
 	{

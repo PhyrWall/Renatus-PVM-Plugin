@@ -27,6 +27,8 @@ import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.externalplugins.ExternalPluginManager;
+import net.runelite.client.externalplugins.PluginHubManifest;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -407,5 +409,15 @@ public class RenatusPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(() -> p.showMessage(message));
 		}
+	}
+
+	static String getPluginVersion()
+	{
+		PluginHubManifest.DisplayData displayData = ExternalPluginManager.getDisplayData(RenatusPlugin.class);
+		if (displayData != null && displayData.getVersion() != null)
+		{
+			return displayData.getVersion();
+		}
+		return "DEV";
 	}
 }
