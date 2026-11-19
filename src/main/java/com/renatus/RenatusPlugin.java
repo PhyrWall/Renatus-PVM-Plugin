@@ -106,7 +106,14 @@ public class RenatusPlugin extends Plugin
 			.build();
 		clientToolbar.addNavigation(navButton);
 
-		refreshTask = executor.scheduleWithFixedDelay(this::refreshAll, 0, REFRESH_MINUTES, TimeUnit.MINUTES);
+		executor.execute(this::refreshAll);
+		refreshTask = executor.scheduleWithFixedDelay(() ->
+		{
+			if (loginHandled)
+			{
+				refreshAll();
+			}
+		}, REFRESH_MINUTES, REFRESH_MINUTES, TimeUnit.MINUTES);
 		ownProfileTask = executor.scheduleWithFixedDelay(() ->
 		{
 			if (loginHandled)
@@ -173,7 +180,7 @@ public class RenatusPlugin extends Plugin
 		}
 		loginHandled = true;
 		reminderDue = true;
-		refreshOwnProfile();
+		refreshAll();
 	}
 
 	@Subscribe

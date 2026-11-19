@@ -449,9 +449,16 @@ class RenatusPanel extends PluginPanel
 
 			// participants is submitter first, then the tagged members
 			List<String> participants = split.getParticipants();
-			String with = participants.size() > 1
-				? "<br><font color='#a5a5a5'>with " + escape(String.join(", ", participants.subList(1, participants.size()))) + "</font>"
-				: "";
+			StringBuilder with = new StringBuilder();
+			if (participants.size() > 1)
+			{
+				with.append("<br><font color='#a5a5a5'>with:");
+				for (String name : participants.subList(1, participants.size()))
+				{
+					with.append("<br>&nbsp;&nbsp;- ").append(escape(name));
+				}
+				with.append("</font>");
+			}
 			long splitValue = split.effectiveSplitValue();
 			String values = (splitValue > 0 ? "<br>Split Value: " + gp(splitValue) + " gp" : "")
 				+ (split.showRawValue() ? "<br><font color='#a5a5a5'>Raw Value: " + gp(split.getRawValue()) + " gp</font>" : "");
