@@ -9,7 +9,7 @@ website and shows:
 - **Confirm splits without leaving the game**: Right-click a split in the
   "Waiting for confirmation" box to confirm or deny it. It counts the same as
   clicking the button in Discord, and the split goes to staff once everyone has answered
-- **New split alerts**: while you're logged in, the plugin checks every 15 minutes and
+- **New split alerts**: while you're logged in, the plugin checks every 5 minutes and
   posts a chat message & sends a notification for when someone tags you in a new split
 - **Pending split info box**: an on-screen counter of splits waiting for your confirmation
 - **Player lookup**: search any clan member, or click a leaderboard or recent-split row
