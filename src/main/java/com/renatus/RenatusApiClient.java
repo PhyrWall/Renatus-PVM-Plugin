@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.function.Consumer;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -38,7 +39,19 @@ public class RenatusApiClient
 	private static final Type LEADERBOARD_TYPE = new TypeToken<List<LeaderboardEntry>>() {}.getType();
 	private static final Type SPLITS_TYPE = new TypeToken<List<Split>>() {}.getType();
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
-	private static final String USER_AGENT = "renatus-pvm (+https://github.com/PhyrWall/Renatus-PVM-Plugin)";
+	private static final String USER_AGENT = "RenatusPvMPlugin/" + RenatusPlugin.getPluginVersion();
+	private static final String BASE_URL = "https://renatus-pvm.com";
+
+	private static final HttpUrl API_ROOT = HttpUrl.get(BASE_URL).newBuilder()
+		.addPathSegment("api")
+		.addPathSegment("plugin")
+		.addPathSegment("v1")
+		.build();
+
+	private static final long DEFAULT_RETRY_AFTER_SECONDS = 30;
+
+
+	private volatile long rateLimitedUntil;
 
 	private final OkHttpClient httpClient;
 	private final Gson gson;
@@ -57,7 +70,6 @@ public class RenatusApiClient
 	enum SetupState
 	{
 		DISABLED,
-		NO_URL,
 		NO_KEY,
 		READY,
 	}
@@ -67,10 +79,6 @@ public class RenatusApiClient
 		if (!config.enableApi())
 		{
 			return SetupState.DISABLED;
-		}
-		if (baseUrl() == null)
-		{
-			return SetupState.NO_URL;
 		}
 		if (config.apiKey().trim().isEmpty())
 		{
@@ -84,23 +92,8 @@ public class RenatusApiClient
 		void onResult(@Nullable T result);
 	}
 
-	@Nullable
-	private HttpUrl baseUrl()
-	{
-		String raw = config.apiBaseUrl().trim();
-		if (raw.isEmpty())
-		{
-			return null;
-		}
-		if (!raw.startsWith("http://") && !raw.startsWith("https://"))
-		{
-			raw = "https://" + raw;
-		}
-		return HttpUrl.parse(raw);
-	}
-
 	/**
-	 * @return the configured API root ({@code <site>/api/plugin/v1/}), or
+	 * @return the API root ({@code <site>/api/plugin/v1/}), or
 	 * null unless {@link #setupState()} is READY
 	 */
 	@Nullable
@@ -110,11 +103,7 @@ public class RenatusApiClient
 		{
 			return null;
 		}
-		return baseUrl().newBuilder()
-			.addPathSegment("api")
-			.addPathSegment("plugin")
-			.addPathSegment("v1")
-			.build();
+		return API_ROOT;
 	}
 
 	/** The API key owner's own profile, including splits waiting on them. */
@@ -177,6 +166,12 @@ public class RenatusApiClient
 			onError.accept("Clan server not configured");
 			return;
 		}
+		long waitSeconds = rateLimitSecondsLeft();
+		if (waitSeconds > 0)
+		{
+			onError.accept(rateLimitMessage(waitSeconds));
+			return;
+		}
 
 		HttpUrl.Builder builder = root.newBuilder();
 		path.accept(builder);
@@ -190,20 +185,28 @@ public class RenatusApiClient
 		httpClient.newCall(request).enqueue(new Callback()
 		{
 			@Override
-			public void onFailure(Call call, IOException e)
+			public void onFailure(@Nonnull Call call, @Nonnull IOException e)
 			{
 				log.debug("Renatus API request to {} failed", request.url(), e);
 				onError.accept("Couldn't reach the clan server");
 			}
 
 			@Override
-			public void onResponse(Call call, Response response)
+			public void onResponse(@Nonnull Call call, @Nonnull Response response)
 			{
 				try (ResponseBody body = response.body())
 				{
 					if (response.code() == 401)
 					{
 						onError.accept("API key not accepted. Run /get-api-key in Discord and paste the new key into the plugin config.");
+						return;
+					}
+					if (response.code() == 429)
+					{
+						long retryAfter = retryAfterSeconds(response);
+						rateLimitedUntil = System.currentTimeMillis() + retryAfter * 1000;
+						log.debug("Renatus API rate limited; retrying after {}s", retryAfter);
+						onError.accept(rateLimitMessage(retryAfter));
 						return;
 					}
 					if (response.code() == 404 && notFoundIsNull)
@@ -227,6 +230,41 @@ public class RenatusApiClient
 				}
 			}
 		});
+	}
+
+	/** Rate limited us and Retry-After hasn't passed yet. */
+	boolean isRateLimited()
+	{
+		return rateLimitSecondsLeft() > 0;
+	}
+
+	private long rateLimitSecondsLeft()
+	{
+		long millisLeft = rateLimitedUntil - System.currentTimeMillis();
+		return millisLeft > 0 ? (millisLeft + 999) / 1000 : 0;
+	}
+
+	private static String rateLimitMessage(long seconds)
+	{
+		return "Too many requests to the clan server. Try again in " + seconds + "s.";
+	}
+
+	/** Retry-After */
+	private static long retryAfterSeconds(Response response)
+	{
+		String header = response.header("Retry-After");
+		if (header != null)
+		{
+			try
+			{
+				return Math.max(1, Long.parseLong(header.trim()));
+			}
+			catch (NumberFormatException e)
+			{
+				log.debug("Unexpected Retry-After header: {}", header);
+			}
+		}
+		return DEFAULT_RETRY_AFTER_SECONDS;
 	}
 
 	/** The server's {"error": "..."} message if it sent one, else a generic one. */

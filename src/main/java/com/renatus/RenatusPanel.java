@@ -31,6 +31,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -54,6 +55,12 @@ class RenatusPanel extends PluginPanel
 
 	private final ItemManager itemManager;
 
+	/** Minimum gap between manual refreshes, so the button can't be spammed. */
+	private static final int REFRESH_COOLDOWN_SECONDS = 30;
+
+	private final JButton refreshButton = new JButton(refreshLabel(0));
+	private Timer cooldownTimer;
+	private int cooldownLeft;
 	private final JLabel messageLabel = new JLabel();
 	private final IconTextField searchField = new IconTextField();
 	private final JPanel profilePanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
@@ -72,6 +79,8 @@ class RenatusPanel extends PluginPanel
 	private List<Rank> ranks = Collections.emptyList();
 	// Profile splits whose participant list is open; kept across refreshes.
 	private final Set<String> expandedSplits = new HashSet<>();
+	// Set when loading failed; drops late results until the next load starts.
+	private boolean loadFailed;
 
 	@Inject
 	RenatusPanel(ItemManager itemManager)
@@ -93,16 +102,17 @@ class RenatusPanel extends PluginPanel
 		title.setFont(FontManager.getRunescapeBoldFont());
 		title.setForeground(GOLD);
 		header.add(title, BorderLayout.WEST);
-		JButton refresh = new JButton("Refresh");
-		refresh.setFocusable(false);
-		refresh.addActionListener(e -> plugin.refreshAll());
-		header.add(refresh, BorderLayout.EAST);
+		refreshButton.setFocusable(false);
+		refreshButton.addActionListener(e ->
+		{
+			plugin.refreshAll();
+			startRefreshCooldown();
+		});
+		header.add(refreshButton, BorderLayout.EAST);
 		add(header);
 
 		messageLabel.setForeground(MUTED);
 		messageLabel.setFont(FontManager.getRunescapeSmallFont());
-		messageLabel.setVisible(false);
-		add(messageLabel);
 
 		searchField.setIcon(IconTextField.Icon.SEARCH);
 		searchField.setPreferredSize(new Dimension(PANEL_WIDTH - 20, 30));
@@ -144,13 +154,14 @@ class RenatusPanel extends PluginPanel
 
 	void showSetup(RenatusApiClient.SetupState state)
 	{
+		if (state != RenatusApiClient.SetupState.READY)
+		{
+			clearData();
+		}
 		switch (state)
 		{
 			case DISABLED:
 				showMessage("Enable \"Connect to clan server\" in the plugin config.");
-				break;
-			case NO_URL:
-				showMessage("Set the clan server URL in the plugin config.");
 				break;
 			case NO_KEY:
 				showMessage("Run /get-api-key in the Renatus Discord and paste the key into the plugin config.");
@@ -163,20 +174,112 @@ class RenatusPanel extends PluginPanel
 	void showMessage(String message)
 	{
 		messageLabel.setText("<html>" + escape(message) + "</html>");
-		messageLabel.setVisible(true);
+		if (messageLabel.getParent() != this)
+		{
+			add(messageLabel, 1); // directly under the header
+		}
 		revalidate();
+		repaint();
 	}
 
 	void clearMessage()
 	{
-		messageLabel.setVisible(false);
+		if (messageLabel.getParent() == this)
+		{
+			remove(messageLabel);
+			revalidate();
+			repaint();
+		}
+	}
+
+	/** Disables the Refresh button for {@link #REFRESH_COOLDOWN_SECONDS}, counting down on it. */
+	private void startRefreshCooldown()
+	{
+		stopRefreshCooldown();
+		cooldownLeft = REFRESH_COOLDOWN_SECONDS;
+		refreshButton.setEnabled(false);
+		refreshButton.setText(refreshLabel(cooldownLeft));
+		cooldownTimer = new Timer(1000, e ->
+		{
+			cooldownLeft--;
+			if (cooldownLeft <= 0)
+			{
+				stopRefreshCooldown();
+			}
+			else
+			{
+				refreshButton.setText(refreshLabel(cooldownLeft));
+			}
+		});
+		cooldownTimer.start();
+	}
+
+	/** Clears any running cooldown and re-enables the Refresh button. */
+	void stopRefreshCooldown()
+	{
+		if (cooldownTimer != null)
+		{
+			cooldownTimer.stop();
+			cooldownTimer = null;
+		}
+		cooldownLeft = 0;
+		refreshButton.setEnabled(true);
+		refreshButton.setText(refreshLabel(0));
+	}
+
+	private static String refreshLabel(int secondsLeft)
+	{
+		return secondsLeft > 0 ? String.valueOf(secondsLeft) : "Refresh";
+	}
+
+	// -- load state -----------------------------------------------------------
+
+	/** Starts a fresh load: data from the server is accepted again. */
+	void beginLoad()
+	{
+		loadFailed = false;
+	}
+
+	/**
+	 * Loading data failed (bad API key, server down...): empty every section
+	 * and show why. Results from the same load that arrive later are dropped
+	 * so the panel doesn't half-fill.
+	 */
+	void loadFailed(String message)
+	{
+		loadFailed = true;
+		clearData();
+		showMessage(message);
+	}
+
+	/** Empties the profile, clan stats, and the leaderboard, recent and ranks tabs. */
+	void clearData()
+	{
+		ownProfile = null;
+		ownLoaded = false;
+		lookupName = null;
+		lookupProfile = null;
+		ranks = Collections.emptyList();
+		expandedSplits.clear();
+		searchField.setText("");
+
+		clanPanel.removeAll();
+		leaderboardList.removeAll();
+		recentList.removeAll();
+		renderProfile();
+		renderRanks();
 		revalidate();
+		repaint();
 	}
 
 	// -- data setters ---------------------------------------------------------
 
 	void setOwnProfile(@Nullable PlayerProfile profile)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		ownProfile = profile;
 		ownLoaded = true;
 		if (lookupName == null)
@@ -194,6 +297,10 @@ class RenatusPanel extends PluginPanel
 
 	void setClan(@Nullable ClanSummary clan)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		clanPanel.removeAll();
 		if (clan != null)
 		{
@@ -210,6 +317,10 @@ class RenatusPanel extends PluginPanel
 
 	void setLeaderboard(@Nullable List<LeaderboardEntry> entries)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		leaderboardList.removeAll();
 		if (entries != null)
 		{
@@ -231,6 +342,10 @@ class RenatusPanel extends PluginPanel
 
 	void setRecentSplits(@Nullable List<Split> splits)
 	{
+		if (loadFailed)
+		{
+			return;
+		}
 		recentList.removeAll();
 		if (splits != null)
 		{
@@ -386,7 +501,6 @@ class RenatusPanel extends PluginPanel
 
 	// -- component helpers ----------------------------------------------------
 
-	/** Red-bordered box listing splits waiting on the user */
 	/** Right-click menu on a pending split: confirm/deny or copy its code. */
 	private JPopupMenu responseMenu(Split split, String code)
 	{

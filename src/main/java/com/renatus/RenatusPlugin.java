@@ -27,6 +27,8 @@ import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.externalplugins.ExternalPluginManager;
+import net.runelite.client.externalplugins.PluginHubManifest;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -88,6 +90,8 @@ public class RenatusPlugin extends Plugin
 	private volatile int pendingCount = -1;
 
 	private volatile boolean loginHandled;
+	// The last data load failed and the panel was emptied; the next poll reloads everything.
+	private volatile boolean loadFailed;
 	private volatile boolean reminderDue;
 
 	@Override
@@ -116,7 +120,15 @@ public class RenatusPlugin extends Plugin
 		}, REFRESH_MINUTES, REFRESH_MINUTES, TimeUnit.MINUTES);
 		ownProfileTask = executor.scheduleWithFixedDelay(() ->
 		{
-			if (loginHandled)
+			if (!loginHandled)
+			{
+				return;
+			}
+			if (loadFailed)
+			{
+				refreshAll();
+			}
+			else
 			{
 				refreshOwnProfile();
 			}
@@ -142,6 +154,11 @@ public class RenatusPlugin extends Plugin
 		pendingInfoBox = null;
 		pendingCount = -1;
 		navButton = null;
+		RenatusPanel p = panel;
+		if (p != null)
+		{
+			SwingUtilities.invokeLater(p::stopRefreshCooldown);
+		}
 		panel = null;
 		loginHandled = false;
 		reminderDue = false;
@@ -209,19 +226,24 @@ public class RenatusPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> p.showSetup(state));
 			return;
 		}
-		SwingUtilities.invokeLater(p::clearMessage);
+		loadFailed = false;
+		SwingUtilities.invokeLater(() ->
+		{
+			p.beginLoad();
+			p.clearMessage();
+		});
 
 		refreshOwnProfile();
 
 		api.fetchClan(
 			clan -> SwingUtilities.invokeLater(() -> p.setClan(clan)),
-			this::showError);
+			this::loadError);
 		api.fetchLeaderboard(config.leaderboardSize(),
 			entries -> SwingUtilities.invokeLater(() -> p.setLeaderboard(entries)),
-			this::showError);
+			this::loadError);
 		api.fetchRecentSplits(RECENT_SPLITS,
 			splits -> SwingUtilities.invokeLater(() -> p.setRecentSplits(splits)),
-			this::showError);
+			this::loadError);
 	}
 
 	/**
@@ -280,7 +302,7 @@ public class RenatusPlugin extends Plugin
 				announceNewPending(profile);
 				updateInfoBox();
 			});
-		}, this::showError);
+		}, this::loadError);
 	}
 
 	/**
@@ -400,6 +422,7 @@ public class RenatusPlugin extends Plugin
 			.build());
 	}
 
+	/** A one-off action (split response, lookup) failed: just show why. */
 	private void showError(String message)
 	{
 		RenatusPanel p = panel;
@@ -407,5 +430,36 @@ public class RenatusPlugin extends Plugin
 		{
 			SwingUtilities.invokeLater(() -> p.showMessage(message));
 		}
+	}
+
+	/**
+	 * Loading the panel's data failed (bad API key, server down...): empty
+	 * the panel and pending info box so nothing stale is shown.
+	 */
+	private void loadError(String message)
+	{
+		if (api.isRateLimited())
+		{
+			showError(message);
+			return;
+		}
+		loadFailed = true;
+		pendingCount = -1;
+		clientThread.invokeLater(this::updateInfoBox);
+		RenatusPanel p = panel;
+		if (p != null)
+		{
+			SwingUtilities.invokeLater(() -> p.loadFailed(message));
+		}
+	}
+
+	static String getPluginVersion()
+	{
+		PluginHubManifest.DisplayData displayData = ExternalPluginManager.getDisplayData(RenatusPlugin.class);
+		if (displayData != null && displayData.getVersion() != null)
+		{
+			return displayData.getVersion();
+		}
+		return "DEV";
 	}
 }

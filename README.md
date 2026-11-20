@@ -21,7 +21,6 @@ Submitting splits and staff approval still happen in Discord.
 1. In the [Renatus PVM Discord](https://discord.gg/renatus), run `/get-api-key`
 2. In RuneLite, open the **Renatus PvM** config and:
     - Turn on **Connect to clan server** (off by default)
-    - set **Clan server URL** to the clan website's address (e.g. `https://renatus-pvm.com`)
     - Paste your key into **API key**
    
 **The key only works while you're an active clan member.**
