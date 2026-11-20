@@ -154,6 +154,11 @@ public class RenatusPlugin extends Plugin
 		pendingInfoBox = null;
 		pendingCount = -1;
 		navButton = null;
+		RenatusPanel p = panel;
+		if (p != null)
+		{
+			SwingUtilities.invokeLater(p::stopRefreshCooldown);
+		}
 		panel = null;
 		loginHandled = false;
 		reminderDue = false;
@@ -433,6 +438,11 @@ public class RenatusPlugin extends Plugin
 	 */
 	private void loadError(String message)
 	{
+		if (api.isRateLimited())
+		{
+			showError(message);
+			return;
+		}
 		loadFailed = true;
 		pendingCount = -1;
 		clientThread.invokeLater(this::updateInfoBox);

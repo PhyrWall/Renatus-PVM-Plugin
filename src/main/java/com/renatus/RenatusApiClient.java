@@ -48,6 +48,11 @@ public class RenatusApiClient
 		.addPathSegment("v1")
 		.build();
 
+	private static final long DEFAULT_RETRY_AFTER_SECONDS = 30;
+
+
+	private volatile long rateLimitedUntil;
+
 	private final OkHttpClient httpClient;
 	private final Gson gson;
 	private final RenatusConfig config;
@@ -161,6 +166,12 @@ public class RenatusApiClient
 			onError.accept("Clan server not configured");
 			return;
 		}
+		long waitSeconds = rateLimitSecondsLeft();
+		if (waitSeconds > 0)
+		{
+			onError.accept(rateLimitMessage(waitSeconds));
+			return;
+		}
 
 		HttpUrl.Builder builder = root.newBuilder();
 		path.accept(builder);
@@ -190,6 +201,14 @@ public class RenatusApiClient
 						onError.accept("API key not accepted. Run /get-api-key in Discord and paste the new key into the plugin config.");
 						return;
 					}
+					if (response.code() == 429)
+					{
+						long retryAfter = retryAfterSeconds(response);
+						rateLimitedUntil = System.currentTimeMillis() + retryAfter * 1000;
+						log.debug("Renatus API rate limited; retrying after {}s", retryAfter);
+						onError.accept(rateLimitMessage(retryAfter));
+						return;
+					}
 					if (response.code() == 404 && notFoundIsNull)
 					{
 						onResult.onResult(null);
@@ -211,6 +230,41 @@ public class RenatusApiClient
 				}
 			}
 		});
+	}
+
+	/** Rate limited us and Retry-After hasn't passed yet. */
+	boolean isRateLimited()
+	{
+		return rateLimitSecondsLeft() > 0;
+	}
+
+	private long rateLimitSecondsLeft()
+	{
+		long millisLeft = rateLimitedUntil - System.currentTimeMillis();
+		return millisLeft > 0 ? (millisLeft + 999) / 1000 : 0;
+	}
+
+	private static String rateLimitMessage(long seconds)
+	{
+		return "Too many requests to the clan server. Try again in " + seconds + "s.";
+	}
+
+	/** Retry-After */
+	private static long retryAfterSeconds(Response response)
+	{
+		String header = response.header("Retry-After");
+		if (header != null)
+		{
+			try
+			{
+				return Math.max(1, Long.parseLong(header.trim()));
+			}
+			catch (NumberFormatException e)
+			{
+				log.debug("Unexpected Retry-After header: {}", header);
+			}
+		}
+		return DEFAULT_RETRY_AFTER_SECONDS;
 	}
 
 	/** The server's {"error": "..."} message if it sent one, else a generic one. */

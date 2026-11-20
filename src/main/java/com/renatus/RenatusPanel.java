@@ -31,6 +31,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -54,6 +55,12 @@ class RenatusPanel extends PluginPanel
 
 	private final ItemManager itemManager;
 
+	/** Minimum gap between manual refreshes, so the button can't be spammed. */
+	private static final int REFRESH_COOLDOWN_SECONDS = 30;
+
+	private final JButton refreshButton = new JButton(refreshLabel(0));
+	private Timer cooldownTimer;
+	private int cooldownLeft;
 	private final JLabel messageLabel = new JLabel();
 	private final IconTextField searchField = new IconTextField();
 	private final JPanel profilePanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
@@ -95,10 +102,13 @@ class RenatusPanel extends PluginPanel
 		title.setFont(FontManager.getRunescapeBoldFont());
 		title.setForeground(GOLD);
 		header.add(title, BorderLayout.WEST);
-		JButton refresh = new JButton("Refresh");
-		refresh.setFocusable(false);
-		refresh.addActionListener(e -> plugin.refreshAll());
-		header.add(refresh, BorderLayout.EAST);
+		refreshButton.setFocusable(false);
+		refreshButton.addActionListener(e ->
+		{
+			plugin.refreshAll();
+			startRefreshCooldown();
+		});
+		header.add(refreshButton, BorderLayout.EAST);
 		add(header);
 
 		messageLabel.setForeground(MUTED);
@@ -180,6 +190,46 @@ class RenatusPanel extends PluginPanel
 			revalidate();
 			repaint();
 		}
+	}
+
+	/** Disables the Refresh button for {@link #REFRESH_COOLDOWN_SECONDS}, counting down on it. */
+	private void startRefreshCooldown()
+	{
+		stopRefreshCooldown();
+		cooldownLeft = REFRESH_COOLDOWN_SECONDS;
+		refreshButton.setEnabled(false);
+		refreshButton.setText(refreshLabel(cooldownLeft));
+		cooldownTimer = new Timer(1000, e ->
+		{
+			cooldownLeft--;
+			if (cooldownLeft <= 0)
+			{
+				stopRefreshCooldown();
+			}
+			else
+			{
+				refreshButton.setText(refreshLabel(cooldownLeft));
+			}
+		});
+		cooldownTimer.start();
+	}
+
+	/** Clears any running cooldown and re-enables the Refresh button. */
+	void stopRefreshCooldown()
+	{
+		if (cooldownTimer != null)
+		{
+			cooldownTimer.stop();
+			cooldownTimer = null;
+		}
+		cooldownLeft = 0;
+		refreshButton.setEnabled(true);
+		refreshButton.setText(refreshLabel(0));
+	}
+
+	private static String refreshLabel(int secondsLeft)
+	{
+		return secondsLeft > 0 ? String.valueOf(secondsLeft) : "Refresh";
 	}
 
 	// -- load state -----------------------------------------------------------
