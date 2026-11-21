@@ -38,6 +38,7 @@ public class RenatusApiClient
 {
 	private static final Type LEADERBOARD_TYPE = new TypeToken<List<LeaderboardEntry>>() {}.getType();
 	private static final Type SPLITS_TYPE = new TypeToken<List<Split>>() {}.getType();
+	private static final Type NAMES_TYPE = new TypeToken<List<String>>() {}.getType();
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private static final String USER_AGENT = "RenatusPvMPlugin/" + RenatusPlugin.getPluginVersion();
 	private static final String BASE_URL = "https://renatus-pvm.com";
@@ -132,6 +133,12 @@ public class RenatusApiClient
 	{
 		get(b -> b.addPathSegment("recent-splits").addQueryParameter("limit", Integer.toString(limit)),
 			SPLITS_TYPE, onResult, onError);
+	}
+
+	/** RSNs of every clan members. */
+	public void fetchMembers(ResultCallback<List<String>> onResult, Consumer<String> onError)
+	{
+		get(b -> b.addPathSegment("members"), NAMES_TYPE, onResult, onError);
 	}
 
 	/**
