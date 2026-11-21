@@ -19,6 +19,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.CacheControl;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.HttpUrl;
@@ -50,6 +51,8 @@ public class RenatusApiClient
 		.build();
 
 	private static final long DEFAULT_RETRY_AFTER_SECONDS = 30;
+
+	private static final CacheControl NO_STORE = new CacheControl.Builder().noStore().build();
 
 
 	private volatile long rateLimitedUntil;
@@ -185,7 +188,9 @@ public class RenatusApiClient
 		Request.Builder requestBuilder = new Request.Builder()
 			.url(builder.build())
 			.header("User-Agent", USER_AGENT)
-			.header("Authorization", "Bearer " + config.apiKey().trim());
+			.header("Authorization", "Bearer " + config.apiKey().trim())
+			// Per-user, authenticated data: keep it out of RuneLite's shared disk cache.
+			.cacheControl(NO_STORE);
 		method.accept(requestBuilder);
 		Request request = requestBuilder.build();
 
@@ -201,6 +206,7 @@ public class RenatusApiClient
 			@Override
 			public void onResponse(@Nonnull Call call, @Nonnull Response response)
 			{
+				String raw = null;
 				try (ResponseBody body = response.body())
 				{
 					if (response.code() == 401)
@@ -223,17 +229,24 @@ public class RenatusApiClient
 					}
 					if (!response.isSuccessful() || body == null)
 					{
-						log.debug("Renatus API {} returned HTTP {}", request.url(), response.code());
+						log.warn("Renatus API {} returned HTTP {}", request.url(), response.code());
 						onError.accept(errorMessage(body, response.code()));
 						return;
 					}
-					T parsed = gson.fromJson(body.charStream(), type);
+					raw = body.string();
+					T parsed = gson.fromJson(raw, type);
 					onResult.onResult(parsed);
 				}
 				catch (JsonParseException e)
 				{
-					log.debug("Renatus API {} returned an unreadable response", request.url(), e);
+					log.warn("Renatus API {} returned an unreadable response (HTTP {}, Content-Type {}): {}",
+						request.url(), response.code(), response.header("Content-Type"), snippet(raw), e);
 					onError.accept("Unexpected response from the clan server");
+				}
+				catch (IOException e)
+				{
+					log.debug("Renatus API {} response body couldn't be read", request.url(), e);
+					onError.accept("Couldn't reach the clan server");
 				}
 			}
 		});
@@ -254,6 +267,16 @@ public class RenatusApiClient
 	private static String rateLimitMessage(long seconds)
 	{
 		return "Too many requests to the clan server. Try again in " + seconds + "s.";
+	}
+
+	/** First part of a response body, for debug logs. */
+	private static String snippet(@Nullable String raw)
+	{
+		if (raw == null)
+		{
+			return "<no body>";
+		}
+		return raw.length() > 500 ? raw.substring(0, 500) + "..." : raw;
 	}
 
 	/** Retry-After */
