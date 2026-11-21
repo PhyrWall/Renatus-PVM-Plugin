@@ -244,6 +244,10 @@ public class RenatusPlugin extends Plugin
 		api.fetchRecentSplits(RECENT_SPLITS,
 			splits -> SwingUtilities.invokeLater(() -> p.setRecentSplits(splits)),
 			this::loadError);
+		// A failure won't  empty the panel.
+		api.fetchMembers(
+			names -> SwingUtilities.invokeLater(() -> p.setMembers(names)),
+			error -> log.debug("Couldn't load clan member names: {}", error));
 	}
 
 	/**

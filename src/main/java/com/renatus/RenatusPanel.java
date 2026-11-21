@@ -13,11 +13,15 @@ import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -33,6 +37,8 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.DynamicGridLayout;
@@ -68,6 +74,15 @@ class RenatusPanel extends PluginPanel
 	private final JPanel leaderboardList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel recentList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel ranksList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
+
+	private static final int MAX_SUGGESTIONS = 8;
+	private final JPanel suggestionsPanel = new JPanel(new DynamicGridLayout(0, 1, 0, 1));
+	private final List<JLabel> suggestionLabels = new ArrayList<>();
+	private final List<String> suggestions = new ArrayList<>();
+	private List<String> members = Collections.emptyList();
+	private int selectedSuggestion = -1;
+	// Set while the panel itself changes the search text, so that doesn't reopen the dropdown.
+	private boolean updatingSearch;
 
 	private RenatusPlugin plugin;
 
@@ -119,15 +134,59 @@ class RenatusPanel extends PluginPanel
 		searchField.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		searchField.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
 		searchField.setToolTipText("Look up a clan member");
-		searchField.addActionListener(e -> plugin.lookupPlayer(searchField.getText()));
+		searchField.addActionListener(e -> submitSearch());
+		searchField.getDocument().addDocumentListener(new DocumentListener()
+		{
+			@Override
+			public void insertUpdate(DocumentEvent e)
+			{
+				updateSuggestions();
+			}
+
+			@Override
+			public void removeUpdate(DocumentEvent e)
+			{
+				updateSuggestions();
+			}
+
+			@Override
+			public void changedUpdate(DocumentEvent e)
+			{
+				updateSuggestions();
+			}
+		});
+		searchField.addKeyListener(new KeyAdapter()
+		{
+			@Override
+			public void keyPressed(KeyEvent e)
+			{
+				switch (e.getKeyCode())
+				{
+					case KeyEvent.VK_DOWN:
+						selectSuggestion(selectedSuggestion + 1);
+						e.consume();
+						break;
+					case KeyEvent.VK_UP:
+						selectSuggestion(selectedSuggestion - 1);
+						e.consume();
+						break;
+					case KeyEvent.VK_ESCAPE:
+						hideSuggestions();
+						break;
+				}
+			}
+		});
 		add(searchField);
+
+		suggestionsPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		suggestionsPanel.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR));
 
 		profilePanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		profilePanel.setBorder(new EmptyBorder(8, 8, 8, 8));
 		add(profilePanel);
 
 		clanPanel.setOpaque(false);
-		add(clanPanel);
+		add(section("Clan Details", clanPanel));
 
 		JPanel tabDisplay = new JPanel(new BorderLayout());
 		tabDisplay.setOpaque(false);
@@ -138,8 +197,7 @@ class RenatusPanel extends PluginPanel
 		tabs.addTab(new MaterialTab("Recent", tabs, recentList));
 		tabs.addTab(new MaterialTab("Ranks", tabs, ranksList));
 		tabs.select(leaderboardTab);
-		add(tabs);
-		add(tabDisplay);
+		add(section("Clan Activity", tabs, tabDisplay));
 
 		for (JPanel list : new JPanel[]{leaderboardList, recentList, ranksList})
 		{
@@ -261,7 +319,9 @@ class RenatusPanel extends PluginPanel
 		lookupProfile = null;
 		ranks = Collections.emptyList();
 		expandedSplits.clear();
+		members = Collections.emptyList();
 		searchField.setText("");
+		hideSuggestions();
 
 		clanPanel.removeAll();
 		leaderboardList.removeAll();
@@ -369,6 +429,162 @@ class RenatusPanel extends PluginPanel
 		}
 		revalidate();
 		repaint();
+	}
+
+	/** Clan member names offered as search suggestions. Null leaves the current list alone. */
+	void setMembers(@Nullable List<String> names)
+	{
+		if (loadFailed || names == null)
+		{
+			return;
+		}
+		List<String> sorted = new ArrayList<>();
+		for (String name : names)
+		{
+			if (name != null && !name.trim().isEmpty())
+			{
+				sorted.add(name);
+			}
+		}
+		sorted.sort(String.CASE_INSENSITIVE_ORDER);
+		members = sorted;
+		updateSuggestions();
+	}
+
+	// -- search suggestions ---------------------------------------------------
+
+	/** Enter in the search field: look up the highlighted suggestion, else what was typed. */
+	private void submitSearch()
+	{
+		if (selectedSuggestion >= 0 && selectedSuggestion < suggestions.size())
+		{
+			lookup(suggestions.get(selectedSuggestion));
+		}
+		else
+		{
+			hideSuggestions();
+			plugin.lookupPlayer(searchField.getText());
+		}
+	}
+
+	/** Rebuilds the dropdown from the search text: names starting with it first, then names containing it. */
+	private void updateSuggestions()
+	{
+		if (updatingSearch)
+		{
+			return;
+		}
+		String query = normalizeName(searchField.getText());
+		suggestions.clear();
+		if (!query.isEmpty())
+		{
+			List<String> contains = new ArrayList<>();
+			for (String name : members)
+			{
+				String normalized = normalizeName(name);
+				if (normalized.startsWith(query))
+				{
+					suggestions.add(name);
+				}
+				else if (normalized.contains(query))
+				{
+					contains.add(name);
+				}
+			}
+			suggestions.addAll(contains);
+			if (suggestions.size() > MAX_SUGGESTIONS)
+			{
+				suggestions.subList(MAX_SUGGESTIONS, suggestions.size()).clear();
+			}
+		}
+		renderSuggestions();
+	}
+
+	private void hideSuggestions()
+	{
+		suggestions.clear();
+		renderSuggestions();
+	}
+
+	private void renderSuggestions()
+	{
+		selectedSuggestion = -1;
+		suggestionsPanel.removeAll();
+		suggestionLabels.clear();
+
+		if (suggestions.isEmpty())
+		{
+			if (suggestionsPanel.getParent() == this)
+			{
+				remove(suggestionsPanel);
+			}
+		}
+		else
+		{
+			for (int i = 0; i < suggestions.size(); i++)
+			{
+				suggestionsPanel.add(suggestionLabel(suggestions.get(i), i));
+			}
+			if (suggestionsPanel.getParent() != this)
+			{
+				add(suggestionsPanel, getComponentZOrder(searchField) + 1); // directly under the search field
+			}
+		}
+		revalidate();
+		repaint();
+	}
+
+	private JLabel suggestionLabel(String name, int index)
+	{
+		JLabel label = new JLabel(name);
+		label.setFont(FontManager.getRunescapeSmallFont());
+		label.setForeground(Color.WHITE);
+		label.setOpaque(true);
+		label.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		label.setBorder(new EmptyBorder(4, 8, 4, 8));
+		label.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		label.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					lookup(name);
+				}
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				selectSuggestion(index);
+			}
+		});
+		suggestionLabels.add(label);
+		return label;
+	}
+
+	/** Highlights one suggestion (arrow keys / hover); out of range clears the highlight. */
+	private void selectSuggestion(int index)
+	{
+		if (suggestions.isEmpty())
+		{
+			return;
+		}
+		selectedSuggestion = Math.max(-1, Math.min(index, suggestions.size() - 1));
+		for (int i = 0; i < suggestionLabels.size(); i++)
+		{
+			boolean selected = i == selectedSuggestion;
+			JLabel label = suggestionLabels.get(i);
+			label.setBackground(selected ? ColorScheme.DARK_GRAY_HOVER_COLOR : ColorScheme.DARKER_GRAY_COLOR);
+			label.setForeground(selected ? GOLD : Color.WHITE);
+		}
+	}
+
+	/** Lower-case, with _, - and non-breaking spaces treated as plain spaces, the way RSNs are written interchangeably. */
+	private static String normalizeName(String name)
+	{
+		return name.replace('_', ' ').replace('-', ' ').replace(' ', ' ').trim().toLowerCase(Locale.ROOT);
 	}
 
 	// -- rendering ------------------------------------------------------------
@@ -482,9 +698,15 @@ class RenatusPanel extends PluginPanel
 	{
 		ranksList.removeAll();
 		PlayerProfile shown = lookupName != null ? lookupProfile : ownProfile;
-		String current = shown != null && shown.getRank() != null ? shown.getRank().getName() : null;
+		Rank currentRank = shown != null ? shown.getRank() : null;
+		String current = currentRank != null ? currentRank.getName() : null;
 		for (Rank rank : ranks)
 		{
+			// Ranks below the one shown are already behind them: list only the current rank and up.
+			if (currentRank != null && isBelow(rank, currentRank))
+			{
+				continue;
+			}
 			String detail = gp(rank.getGpRequired()) + " gp · " + rank.getDaysRequired() + " days";
 			JPanel row = row(null, rank.getName(), detail, "");
 			if (rank.getName().equals(current))
@@ -497,6 +719,20 @@ class RenatusPanel extends PluginPanel
 		}
 		ranksList.revalidate();
 		ranksList.repaint();
+	}
+
+	/** Whether {@code rank} sits below {@code current}: lower gp requirement, or equal gp and fewer days. */
+	private static boolean isBelow(Rank rank, Rank current)
+	{
+		if (rank.getName().equals(current.getName()))
+		{
+			return false;
+		}
+		if (rank.getGpRequired() != current.getGpRequired())
+		{
+			return rank.getGpRequired() < current.getGpRequired();
+		}
+		return rank.getDaysRequired() < current.getDaysRequired();
 	}
 
 	// -- component helpers ----------------------------------------------------
@@ -837,7 +1073,16 @@ class RenatusPanel extends PluginPanel
 
 	private void lookup(String name)
 	{
-		searchField.setText(name);
+		updatingSearch = true;
+		try
+		{
+			searchField.setText(name);
+		}
+		finally
+		{
+			updatingSearch = false;
+		}
+		hideSuggestions();
 		plugin.lookupPlayer(name);
 	}
 
@@ -878,6 +1123,34 @@ class RenatusPanel extends PluginPanel
 				row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 			}
 		});
+	}
+
+	/** An outlined box with a gold title bar on top, holding the given components stacked vertically. */
+	private static JComponent section(String title, JComponent... contents)
+	{
+		JPanel box = new JPanel(new DynamicGridLayout(0, 1, 0, 6));
+		box.setOpaque(false);
+		box.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
+			new EmptyBorder(4, 6, 6, 6)));
+		box.add(sectionDivider(title));
+		for (JComponent content : contents)
+		{
+			box.add(content);
+		}
+		return box;
+	}
+
+	/** A titled gold bar heading a section. */
+	private static JComponent sectionDivider(String text)
+	{
+		JPanel divider = new JPanel(new BorderLayout());
+		divider.setOpaque(false);
+		divider.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 0, 2, 0, GOLD),
+			new EmptyBorder(4, 2, 3, 2)));
+		divider.add(bold(text, GOLD), BorderLayout.WEST);
+		return divider;
 	}
 
 	private JComponent statBox(String label, String value)
