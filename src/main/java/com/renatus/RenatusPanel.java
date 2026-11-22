@@ -55,9 +55,9 @@ import net.runelite.client.util.QuantityFormatter;
  */
 class RenatusPanel extends PluginPanel
 {
-	private static final Color GOLD = new Color(255, 200, 60);
+	static final Color GOLD = new Color(255, 200, 60);
 	private static final Color MUTED = ColorScheme.LIGHT_GRAY_COLOR;
-	private static final Color PENDING_RED = new Color(230, 70, 70);
+	static final Color PENDING_RED = new Color(230, 70, 70);
 
 	private final ItemManager itemManager;
 

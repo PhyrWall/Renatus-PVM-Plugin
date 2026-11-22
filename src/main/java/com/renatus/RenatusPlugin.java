@@ -4,7 +4,10 @@ import com.google.inject.Provides;
 import com.renatus.model.PlayerProfile;
 import com.renatus.model.Split;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -29,6 +32,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 import net.runelite.client.externalplugins.PluginHubManifest;
+import net.runelite.client.game.ChatIconManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -49,6 +53,11 @@ public class RenatusPlugin extends Plugin
 	/** How often /me is polled while logged in, to catch newly tagged splits. Matches the server's cache TTL. */
 	private static final long OWN_PROFILE_POLL = 5;
 	private static final int RECENT_SPLITS = 5;
+
+	private static final int REMINDER_DELAY_TICKS = 10;
+	private static final int CHAT_ICON_SIZE = 13;
+	private static final int REMINDER_MAX_NAMES = 3;
+	private static final String LOGGED_OUT_MESSAGE = "Log in to view Renatus PvM.";
 
 	@Inject
 	private Client client;
@@ -77,6 +86,10 @@ public class RenatusPlugin extends Plugin
 	@Inject
 	private ScheduledExecutorService executor;
 
+	@Inject
+	private ChatIconManager chatIconManager;
+	private int chatIconId = -1;
+
 	private RenatusPanel panel;
 	private NavigationButton navButton;
 	private ScheduledFuture<?> refreshTask;
@@ -94,6 +107,9 @@ public class RenatusPlugin extends Plugin
 	private volatile boolean loadFailed;
 	private volatile boolean reminderDue;
 
+	private int ticksSinceLogin;
+	private PlayerProfile reminderProfile;
+
 	@Override
 	protected void startUp()
 	{
@@ -109,8 +125,14 @@ public class RenatusPlugin extends Plugin
 			.panel(panel)
 			.build();
 		clientToolbar.addNavigation(navButton);
+		if (chatIconId == -1)
+		{
+			chatIconId = chatIconManager.registerChatIcon(
+				ImageUtil.resizeImage(infoBoxImage, CHAT_ICON_SIZE, CHAT_ICON_SIZE));
+		}
 
-		executor.execute(this::refreshAll);
+		// Nothing is fetched until the first game tick while logged in.
+		showLoggedOut();
 		refreshTask = executor.scheduleWithFixedDelay(() ->
 		{
 			if (loginHandled)
@@ -162,6 +184,7 @@ public class RenatusPlugin extends Plugin
 		panel = null;
 		loginHandled = false;
 		reminderDue = false;
+		reminderProfile = null;
 	}
 
 	@Provides
@@ -177,7 +200,11 @@ public class RenatusPlugin extends Plugin
 		{
 			loginHandled = false;
 			reminderDue = false;
+			reminderProfile = null;
 			knownPendingCodes = null;
+			pendingCount = -1;
+			updateInfoBox();
+			showLoggedOut();
 		}
 	}
 
@@ -188,6 +215,8 @@ public class RenatusPlugin extends Plugin
 		// pending-split reminder lands once the chatbox is ready.
 		if (loginHandled)
 		{
+			ticksSinceLogin++;
+			maybeRemindPending();
 			return;
 		}
 		Player player = client.getLocalPlayer();
@@ -197,6 +226,8 @@ public class RenatusPlugin extends Plugin
 		}
 		loginHandled = true;
 		reminderDue = true;
+		reminderProfile = null;
+		ticksSinceLogin = 0;
 		refreshAll();
 	}
 
@@ -217,6 +248,11 @@ public class RenatusPlugin extends Plugin
 		RenatusPanel p = panel;
 		if (p == null)
 		{
+			return;
+		}
+		if (!loginHandled)
+		{
+			showLoggedOut();
 			return;
 		}
 
@@ -258,7 +294,7 @@ public class RenatusPlugin extends Plugin
 	void respondToSplit(Split split, boolean approve)
 	{
 		RenatusPanel p = panel;
-		if (p == null || split.getCode() == null || api.apiRoot() == null)
+		if (p == null || !loginHandled || split.getCode() == null || api.apiRoot() == null)
 		{
 			return;
 		}
@@ -278,31 +314,40 @@ public class RenatusPlugin extends Plugin
 	{
 		RenatusPanel p = panel;
 		String name = Text.toJagexName(rsn);
-		if (p == null || name.isEmpty() || api.apiRoot() == null)
+		if (p == null || !loginHandled || name.isEmpty() || api.apiRoot() == null)
 		{
 			return;
 		}
-		api.fetchPlayer(name,
-			profile -> SwingUtilities.invokeLater(() -> p.setLookupProfile(name, profile)),
-			this::showError);
+		api.fetchPlayer(name, profile ->
+		{
+			if (loginHandled)
+			{
+				SwingUtilities.invokeLater(() -> p.setLookupProfile(name, profile));
+			}
+		}, this::showError);
 	}
 
 	private void refreshOwnProfile()
 	{
 		RenatusPanel p = panel;
-		if (p == null || api.apiRoot() == null)
+		if (p == null || !loginHandled || api.apiRoot() == null)
 		{
 			return;
 		}
 		// /me is resolved from the API key, so it works for any account the
-		// member plays (main or alt) and even while logged out.
+		// member plays (main or alt).
 		api.fetchMe(profile ->
 		{
+			if (!loginHandled)
+			{
+				return; // logged out while the request was in flight
+			}
 			SwingUtilities.invokeLater(() -> p.setOwnProfile(profile));
-			maybeRemindPending(profile);
 			pendingCount = profile != null ? profile.getPendingConfirmations().size() : -1;
 			clientThread.invokeLater(() ->
 			{
+				reminderProfile = profile;
+				maybeRemindPending();
 				announceNewPending(profile);
 				updateInfoBox();
 			});
@@ -348,13 +393,10 @@ public class RenatusPlugin extends Plugin
 			{
 				continue;
 			}
-			String message = new ChatMessageBuilder()
-				.append(ChatColorType.HIGHLIGHT)
-				.append("[Renatus] ")
+			String message = chatPrefix()
 				.append(ChatColorType.NORMAL)
 				.append("New split to confirm: ")
-				.append(ChatColorType.HIGHLIGHT)
-				.append(split.getItemName())
+				.append(RenatusPanel.PENDING_RED, split.getItemName())
 				.append(ChatColorType.NORMAL)
 				.append(" from " + split.getSubmitter() + " (code " + split.getCode() + "). Confirm it in Discord.")
 				.build();
@@ -391,14 +433,19 @@ public class RenatusPlugin extends Plugin
 		}
 	}
 
-	private void maybeRemindPending(PlayerProfile profile)
+	/**
+	 * Sends the login reminder once {@link #REMINDER_DELAY_TICKS} have passed
+	 * and /me has loaded, whichever comes last. Client thread only.
+	 */
+	private void maybeRemindPending()
 	{
-		if (!reminderDue)
+		PlayerProfile profile = reminderProfile;
+		if (!reminderDue || !loginHandled || ticksSinceLogin < REMINDER_DELAY_TICKS || profile == null)
 		{
 			return;
 		}
 		reminderDue = false;
-		if (profile == null || !config.pendingReminder())
+		if (!config.pendingReminder())
 		{
 			return;
 		}
@@ -409,16 +456,29 @@ public class RenatusPlugin extends Plugin
 			return;
 		}
 
-		String message = new ChatMessageBuilder()
-			.append(ChatColorType.HIGHLIGHT)
-			.append("[Renatus] ")
+		Set<String> submitters = new LinkedHashSet<>();
+		for (Split split : profile.getPendingConfirmations())
+		{
+			if (split.getSubmitter() != null && !split.getSubmitter().isEmpty())
+			{
+				submitters.add(split.getSubmitter());
+			}
+		}
+
+		ChatMessageBuilder builder = chatPrefix()
 			.append(ChatColorType.NORMAL)
 			.append("You have ")
-			.append(ChatColorType.HIGHLIGHT)
-			.append(Integer.toString(pending))
+			.append(RenatusPanel.PENDING_RED, Integer.toString(pending))
 			.append(ChatColorType.NORMAL)
-			.append(pending == 1 ? " split" : " splits")
-			.append(" waiting for your confirmation in Discord.")
+			.append(pending == 1 ? " split" : " splits");
+		if (!submitters.isEmpty())
+		{
+			builder.append(" from ");
+			appendNames(builder, new ArrayList<>(submitters));
+		}
+		String message = builder
+			.append(ChatColorType.NORMAL)
+			.append(" waiting for your confirmation.")
 			.build();
 		chatMessageManager.queue(QueuedMessage.builder()
 			.type(ChatMessageType.CONSOLE)
@@ -426,11 +486,47 @@ public class RenatusPlugin extends Plugin
 			.build());
 	}
 
+	/**
+	 * Appends "A", "A and B", "A, B and C" or "A, B, C and N others",
+	 * with the names highlighted.
+	 */
+	private static void appendNames(ChatMessageBuilder builder, List<String> names)
+	{
+		int shown = Math.min(names.size(), REMINDER_MAX_NAMES);
+		int others = names.size() - shown;
+		for (int i = 0; i < shown; i++)
+		{
+			if (i > 0)
+			{
+				boolean last = i == shown - 1 && others == 0;
+				builder.append(ChatColorType.NORMAL).append(last ? " and " : ", ");
+			}
+			builder.append(ChatColorType.HIGHLIGHT).append(names.get(i));
+		}
+		if (others > 0)
+		{
+			builder.append(ChatColorType.NORMAL)
+				.append(" and " + others + (others == 1 ? " other" : " others"));
+		}
+	}
+
+	/** Starts a chat message with the Renatus icon (once loaded) and a gold [Renatus] tag. */
+	private ChatMessageBuilder chatPrefix()
+	{
+		ChatMessageBuilder builder = new ChatMessageBuilder();
+		int iconIndex = chatIconId != -1 ? chatIconManager.chatIconIndex(chatIconId) : -1;
+		if (iconIndex != -1)
+		{
+			builder.img(iconIndex).append(" ");
+		}
+		return builder.append(RenatusPanel.GOLD, "[Renatus] ");
+	}
+
 	/** A one-off action (split response, lookup) failed: just show why. */
 	private void showError(String message)
 	{
 		RenatusPanel p = panel;
-		if (p != null)
+		if (p != null && loginHandled)
 		{
 			SwingUtilities.invokeLater(() -> p.showMessage(message));
 		}
@@ -442,6 +538,10 @@ public class RenatusPlugin extends Plugin
 	 */
 	private void loadError(String message)
 	{
+		if (!loginHandled)
+		{
+			return; // logged out while the request was in flight
+		}
 		if (api.isRateLimited())
 		{
 			showError(message);
@@ -454,6 +554,16 @@ public class RenatusPlugin extends Plugin
 		if (p != null)
 		{
 			SwingUtilities.invokeLater(() -> p.loadFailed(message));
+		}
+	}
+
+	/** Empties the panel and asks the player to log in. Late results are dropped. */
+	private void showLoggedOut()
+	{
+		RenatusPanel p = panel;
+		if (p != null)
+		{
+			SwingUtilities.invokeLater(() -> p.loadFailed(LOGGED_OUT_MESSAGE));
 		}
 	}
 
