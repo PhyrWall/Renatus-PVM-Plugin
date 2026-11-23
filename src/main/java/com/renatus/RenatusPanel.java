@@ -1,5 +1,6 @@
 package com.renatus;
 
+import com.renatus.model.Broadcast;
 import com.renatus.model.ClanSummary;
 import com.renatus.model.LeaderboardEntry;
 import com.renatus.model.PlayerProfile;
@@ -10,6 +11,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -33,6 +35,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -74,6 +77,10 @@ class RenatusPanel extends PluginPanel
 	private final JPanel leaderboardList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel recentList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel ranksList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
+	private final JPanel broadcastList = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
+	/** The "Notifications" box; only in the panel while there are broadcasts to show. */
+	private JComponent broadcastSection;
+	private JComponent header;
 
 	private static final int MAX_SUGGESTIONS = 8;
 	private final JPanel suggestionsPanel = new JPanel(new DynamicGridLayout(0, 1, 0, 1));
@@ -112,6 +119,7 @@ class RenatusPanel extends PluginPanel
 		setLayout(new DynamicGridLayout(0, 1, 0, 8));
 
 		JPanel header = new JPanel(new BorderLayout());
+		this.header = header;
 		header.setOpaque(false);
 		JLabel title = new JLabel("Renatus PvM");
 		title.setFont(FontManager.getRunescapeBoldFont());
@@ -125,6 +133,9 @@ class RenatusPanel extends PluginPanel
 		});
 		header.add(refreshButton, BorderLayout.EAST);
 		add(header);
+
+		broadcastList.setOpaque(false);
+		broadcastSection = section("Notifications", broadcastList);
 
 		messageLabel.setForeground(MUTED);
 		messageLabel.setFont(FontManager.getRunescapeSmallFont());
@@ -214,6 +225,7 @@ class RenatusPanel extends PluginPanel
 	{
 		if (state != RenatusApiClient.SetupState.READY)
 		{
+			setBroadcasts(null);
 			clearData();
 		}
 		switch (state)
@@ -333,6 +345,89 @@ class RenatusPanel extends PluginPanel
 	}
 
 	// -- data setters ---------------------------------------------------------
+
+	/**
+	 * Shows the clan notifications at the top of the panel (under the header
+	 * and any status message), or removes the section when there are none.
+	 */
+	void setBroadcasts(@Nullable List<Broadcast> broadcasts)
+	{
+		broadcastList.removeAll();
+		boolean any = false;
+		if (broadcasts != null)
+		{
+			for (Broadcast broadcast : broadcasts)
+			{
+				if (broadcast != null && broadcast.getMessage() != null && !broadcast.getMessage().trim().isEmpty())
+				{
+					broadcastList.add(broadcastRow(broadcast));
+					any = true;
+				}
+			}
+		}
+
+		if (!any)
+		{
+			if (broadcastSection.getParent() == this)
+			{
+				remove(broadcastSection);
+			}
+		}
+		else if (broadcastSection.getParent() != this)
+		{
+			// Right after the header, or after the status message when one is showing.
+			int index = getComponentZOrder(header) + 1;
+			if (messageLabel.getParent() == this)
+			{
+				index++;
+			}
+			add(broadcastSection, index);
+		}
+		revalidate();
+		repaint();
+	}
+
+	private JComponent broadcastRow(Broadcast broadcast)
+	{
+		JPanel row = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 2, 0, 0, GOLD),
+			new EmptyBorder(4, 6, 4, 6)));
+
+		if (broadcast.getTitle() != null && !broadcast.getTitle().trim().isEmpty())
+		{
+			row.add(wrappedText(broadcast.getTitle(), FontManager.getRunescapeBoldFont()));
+		}
+		row.add(wrappedText(broadcast.getMessage(), FontManager.getRunescapeSmallFont()));
+
+		String footer = date(broadcast.getDate());
+		if (!footer.isEmpty())
+		{
+			row.add(muted(footer));
+		}
+		return row;
+	}
+
+	/**
+	 * Read-only text that word-wraps to whatever width the layout gives it.
+	 * HTML labels with a CSS width overflow the panel, so use a JTextArea.
+	 */
+	private static JTextArea wrappedText(String text, Font font)
+	{
+		JTextArea area = new JTextArea(text.trim().replace("\r\n", "\n"));
+		area.setLineWrap(true);
+		area.setWrapStyleWord(true);
+		area.setEditable(false);
+		area.setFocusable(false);
+		area.setOpaque(false);
+		area.setBorder(null);
+		area.setFont(font);
+		area.setForeground(Color.WHITE);
+		// Prime the width so the first preferred height already accounts for wrapping.
+		area.setSize(PANEL_WIDTH - 48, Short.MAX_VALUE);
+		return area;
+	}
 
 	void setOwnProfile(@Nullable PlayerProfile profile)
 	{

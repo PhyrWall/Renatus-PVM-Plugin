@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
+import com.renatus.model.Broadcast;
 import com.renatus.model.ClanSummary;
 import com.renatus.model.LeaderboardEntry;
 import com.renatus.model.PlayerProfile;
@@ -39,6 +40,7 @@ public class RenatusApiClient
 {
 	private static final Type LEADERBOARD_TYPE = new TypeToken<List<LeaderboardEntry>>() {}.getType();
 	private static final Type SPLITS_TYPE = new TypeToken<List<Split>>() {}.getType();
+	private static final Type BROADCASTS_TYPE = new TypeToken<List<Broadcast>>() {}.getType();
 	private static final Type NAMES_TYPE = new TypeToken<List<String>>() {}.getType();
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private static final String USER_AGENT = "RenatusPvMPlugin/" + RenatusPlugin.getPluginVersion();
@@ -142,6 +144,12 @@ public class RenatusApiClient
 	public void fetchMembers(ResultCallback<List<String>> onResult, Consumer<String> onError)
 	{
 		get(b -> b.addPathSegment("members"), NAMES_TYPE, onResult, onError);
+	}
+
+	/** Clan-wide notifications. Null (404) on servers without the endpoint. */
+	public void fetchBroadcasts(ResultCallback<List<Broadcast>> onResult, Consumer<String> onError)
+	{
+		get(b -> b.addPathSegment("broadcast"), BROADCASTS_TYPE, onResult, onError);
 	}
 
 	/**
