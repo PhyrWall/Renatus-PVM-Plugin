@@ -106,6 +106,8 @@ public class RenatusPlugin extends Plugin
 	// The last data load failed and the panel was emptied; the next poll reloads everything.
 	private volatile boolean loadFailed;
 	private volatile boolean reminderDue;
+	/** /broadcast is fetched once per login */
+	private volatile boolean broadcastsFetched;
 
 	private int ticksSinceLogin;
 	private PlayerProfile reminderProfile;
@@ -185,6 +187,7 @@ public class RenatusPlugin extends Plugin
 		loginHandled = false;
 		reminderDue = false;
 		reminderProfile = null;
+		broadcastsFetched = false;
 	}
 
 	@Provides
@@ -201,6 +204,7 @@ public class RenatusPlugin extends Plugin
 			loginHandled = false;
 			reminderDue = false;
 			reminderProfile = null;
+			broadcastsFetched = false;
 			knownPendingCodes = null;
 			pendingCount = -1;
 			updateInfoBox();
@@ -259,6 +263,7 @@ public class RenatusPlugin extends Plugin
 		RenatusApiClient.SetupState state = api.setupState();
 		if (state != RenatusApiClient.SetupState.READY)
 		{
+			broadcastsFetched = false;
 			SwingUtilities.invokeLater(() -> p.showSetup(state));
 			return;
 		}
@@ -270,6 +275,7 @@ public class RenatusPlugin extends Plugin
 		});
 
 		refreshOwnProfile();
+		fetchBroadcasts();
 
 		api.fetchClan(
 			clan -> SwingUtilities.invokeLater(() -> p.setClan(clan)),
@@ -284,6 +290,30 @@ public class RenatusPlugin extends Plugin
 		api.fetchMembers(
 			names -> SwingUtilities.invokeLater(() -> p.setMembers(names)),
 			error -> log.debug("Couldn't load clan member names: {}", error));
+	}
+
+	/**
+	 * Fetches the clan notifications.
+	 */
+	private void fetchBroadcasts()
+	{
+		RenatusPanel p = panel;
+		if (p == null || broadcastsFetched)
+		{
+			return;
+		}
+		broadcastsFetched = true;
+		api.fetchBroadcasts(broadcasts ->
+		{
+			if (loginHandled)
+			{
+				SwingUtilities.invokeLater(() -> p.setBroadcasts(broadcasts));
+			}
+		}, error ->
+		{
+			log.debug("Couldn't load clan notifications: {}", error);
+			broadcastsFetched = false;
+		});
 	}
 
 	/**
@@ -563,7 +593,11 @@ public class RenatusPlugin extends Plugin
 		RenatusPanel p = panel;
 		if (p != null)
 		{
-			SwingUtilities.invokeLater(() -> p.loadFailed(LOGGED_OUT_MESSAGE));
+			SwingUtilities.invokeLater(() ->
+			{
+				p.setBroadcasts(null);
+				p.loadFailed(LOGGED_OUT_MESSAGE);
+			});
 		}
 	}
 
