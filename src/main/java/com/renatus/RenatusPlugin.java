@@ -246,6 +246,13 @@ public class RenatusPlugin extends Plugin
 		refreshAll();
 	}
 
+	/** The panel's refresh button: like {@link #refreshAll()}, but also re-fetches the broadcasts. */
+	void manualRefresh()
+	{
+		broadcastsFetched = false;
+		refreshAll();
+	}
+
 	/** Re-fetches everything. Safe to call from any thread. */
 	void refreshAll()
 	{

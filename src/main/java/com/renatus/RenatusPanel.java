@@ -128,7 +128,7 @@ class RenatusPanel extends PluginPanel
 		refreshButton.setFocusable(false);
 		refreshButton.addActionListener(e ->
 		{
-			plugin.refreshAll();
+			plugin.manualRefresh();
 			startRefreshCooldown();
 		});
 		header.add(refreshButton, BorderLayout.EAST);
