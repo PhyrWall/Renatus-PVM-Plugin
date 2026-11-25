@@ -781,7 +781,7 @@ class RenatusPanel extends PluginPanel
 
 		if (!profile.getRecentSplits().isEmpty())
 		{
-			profilePanel.add(bold("Your Recent Splits", Color.WHITE));
+			profilePanel.add(bold("Recent Splits", Color.WHITE));
 			for (Split split : profile.getRecentSplits())
 			{
 				profilePanel.add(recentSplitEntry(split));
