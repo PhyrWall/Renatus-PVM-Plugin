@@ -67,12 +67,23 @@ public interface RenatusConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+		keyName = "broadcastChat",
+		name = "Notifications in chat",
+		description = "Also post clan notifications to the chatbox when they load on login or refresh",
+		position = 6
+	)
+	default boolean broadcastChat()
+	{
+		return true;
+	}
+
 	@Range(min = 5, max = 50)
 	@ConfigItem(
 		keyName = "leaderboardSize",
 		name = "Leaderboard size",
 		description = "How many members to show on the leaderboard tab",
-		position = 6
+		position = 7
 	)
 	default int leaderboardSize()
 	{

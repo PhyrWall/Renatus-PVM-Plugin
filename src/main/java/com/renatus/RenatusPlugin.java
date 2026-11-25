@@ -1,6 +1,7 @@
 package com.renatus;
 
 import com.google.inject.Provides;
+import com.renatus.model.Broadcast;
 import com.renatus.model.PlayerProfile;
 import com.renatus.model.Split;
 import java.awt.image.BufferedImage;
@@ -108,6 +109,8 @@ public class RenatusPlugin extends Plugin
 	private volatile boolean reminderDue;
 	/** /broadcast is fetched once per login */
 	private volatile boolean broadcastsFetched;
+	/** Broadcasts waiting to be posted to chat once it's ready; null when there's nothing to post. */
+	private volatile List<Broadcast> chatBroadcasts;
 
 	private int ticksSinceLogin;
 	private PlayerProfile reminderProfile;
@@ -188,6 +191,7 @@ public class RenatusPlugin extends Plugin
 		reminderDue = false;
 		reminderProfile = null;
 		broadcastsFetched = false;
+		chatBroadcasts = null;
 	}
 
 	@Provides
@@ -205,6 +209,7 @@ public class RenatusPlugin extends Plugin
 			reminderDue = false;
 			reminderProfile = null;
 			broadcastsFetched = false;
+			chatBroadcasts = null;
 			knownPendingCodes = null;
 			pendingCount = -1;
 			updateInfoBox();
@@ -221,6 +226,7 @@ public class RenatusPlugin extends Plugin
 		{
 			ticksSinceLogin++;
 			maybeRemindPending();
+			maybePostBroadcasts();
 			return;
 		}
 		Player player = client.getLocalPlayer();
@@ -250,6 +256,7 @@ public class RenatusPlugin extends Plugin
 	void manualRefresh()
 	{
 		broadcastsFetched = false;
+		chatBroadcasts = null;
 		refreshAll();
 	}
 
@@ -271,6 +278,7 @@ public class RenatusPlugin extends Plugin
 		if (state != RenatusApiClient.SetupState.READY)
 		{
 			broadcastsFetched = false;
+			chatBroadcasts = null;
 			SwingUtilities.invokeLater(() -> p.showSetup(state));
 			return;
 		}
@@ -315,11 +323,13 @@ public class RenatusPlugin extends Plugin
 			if (loginHandled)
 			{
 				SwingUtilities.invokeLater(() -> p.setBroadcasts(broadcasts));
+				chatBroadcasts = broadcasts;
 			}
 		}, error ->
 		{
 			log.debug("Couldn't load clan notifications: {}", error);
 			broadcastsFetched = false;
+			chatBroadcasts = null;
 		});
 	}
 
@@ -521,6 +531,45 @@ public class RenatusPlugin extends Plugin
 			.type(ChatMessageType.CONSOLE)
 			.runeLiteFormattedMessage(message)
 			.build());
+	}
+
+	/**
+	 * Posts the last fetched broadcasts to chat once {@link #REMINDER_DELAY_TICKS}
+	 * have passed since login.
+	 */
+	private void maybePostBroadcasts()
+	{
+		List<Broadcast> broadcasts = chatBroadcasts;
+		if (broadcasts == null || ticksSinceLogin < REMINDER_DELAY_TICKS)
+		{
+			return;
+		}
+		chatBroadcasts = null;
+		if (!config.broadcastChat())
+		{
+			return;
+		}
+
+		for (Broadcast broadcast : broadcasts)
+		{
+			if (broadcast == null || broadcast.getMessage() == null || broadcast.getMessage().trim().isEmpty())
+			{
+				continue;
+			}
+			ChatMessageBuilder builder = chatPrefix();
+			if (broadcast.getTitle() != null && !broadcast.getTitle().trim().isEmpty())
+			{
+				builder.append(ChatColorType.HIGHLIGHT).append(broadcast.getTitle().trim() + ": ");
+			}
+			String message = builder
+				.append(ChatColorType.NORMAL)
+				.append(broadcast.getMessage().trim())
+				.build();
+			chatMessageManager.queue(QueuedMessage.builder()
+				.type(ChatMessageType.CONSOLE)
+				.runeLiteFormattedMessage(message)
+				.build());
+		}
 	}
 
 	/**
