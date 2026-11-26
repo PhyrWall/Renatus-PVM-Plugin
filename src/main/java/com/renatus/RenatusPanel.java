@@ -51,6 +51,7 @@ import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.ui.components.ProgressBar;
 import net.runelite.client.ui.components.materialtabs.MaterialTab;
 import net.runelite.client.ui.components.materialtabs.MaterialTabGroup;
+import net.runelite.client.util.LinkBrowser;
 import net.runelite.client.util.QuantityFormatter;
 
 /**
@@ -67,13 +68,16 @@ class RenatusPanel extends PluginPanel
 	/** Minimum gap between manual refreshes, so the button can't be spammed. */
 	private static final int REFRESH_COOLDOWN_SECONDS = 30;
 
+	// LinkBrowser only accepts http(s) URLs; Discord's web page hands off to the desktop app.
+	private static final String DISCORD_URL = "https://discord.com/channels/707522752860520468/974283112647364648";
+
 	private final JButton refreshButton = new JButton(refreshLabel(0));
 	private Timer cooldownTimer;
 	private int cooldownLeft;
 	private final JLabel messageLabel = new JLabel();
 	private final IconTextField searchField = new IconTextField();
 	private final JPanel profilePanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
-	private final JPanel clanPanel = new JPanel(new GridLayout(2, 2, 4, 4));
+	private final JPanel clanPanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
 	private final JPanel leaderboardList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel recentList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel ranksList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
@@ -459,10 +463,19 @@ class RenatusPanel extends PluginPanel
 		clanPanel.removeAll();
 		if (clan != null)
 		{
-			clanPanel.add(statBox("Members", Integer.toString(clan.getActiveMembers())));
-			clanPanel.add(statBox("Total split", gp(clan.getTotalGp())));
-			clanPanel.add(statBox("Splits this month", Integer.toString(clan.getSplitsThisMonth())));
-			clanPanel.add(statBox("Last month", Integer.toString(clan.getSplitsLastMonth())));
+			JPanel stats = new JPanel(new GridLayout(2, 2, 4, 4));
+			stats.setOpaque(false);
+			stats.add(statBox("Members", Integer.toString(clan.getActiveMembers())));
+			stats.add(statBox("Total split", gp(clan.getTotalGp())));
+			stats.add(statBox("Splits this month", Integer.toString(clan.getSplitsThisMonth())));
+			stats.add(statBox("Last month", Integer.toString(clan.getSplitsLastMonth())));
+			clanPanel.add(stats);
+
+			JButton discordButton = new JButton("Submit Drop Split on Discord");
+			discordButton.setFocusable(false);
+			discordButton.setToolTipText("Open the clan Discord channel");
+			discordButton.addActionListener(e -> LinkBrowser.browse(DISCORD_URL));
+			clanPanel.add(discordButton);
 			ranks = clan.getRanks() != null ? clan.getRanks() : Collections.emptyList();
 			renderRanks();
 		}
