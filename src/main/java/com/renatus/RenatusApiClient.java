@@ -128,9 +128,17 @@ public class RenatusApiClient
 		get(b -> b.addPathSegment("clan"), ClanSummary.class, onResult, onError);
 	}
 
-	public void fetchLeaderboard(int limit, ResultCallback<List<LeaderboardEntry>> onResult, Consumer<String> onError)
+	/** @param days only count splits from the last this many days; 0 for all time */
+	public void fetchLeaderboard(int limit, int days, ResultCallback<List<LeaderboardEntry>> onResult, Consumer<String> onError)
 	{
-		get(b -> b.addPathSegment("leaderboard").addQueryParameter("limit", Integer.toString(limit)),
+		get(b ->
+			{
+				b.addPathSegment("leaderboard").addQueryParameter("limit", Integer.toString(limit));
+				if (days > 0)
+				{
+					b.addQueryParameter("days", Integer.toString(days));
+				}
+			},
 			LEADERBOARD_TYPE, onResult, onError);
 	}
 

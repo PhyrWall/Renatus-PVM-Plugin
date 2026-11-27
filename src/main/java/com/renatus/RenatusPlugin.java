@@ -295,8 +295,9 @@ public class RenatusPlugin extends Plugin
 		api.fetchClan(
 			clan -> SwingUtilities.invokeLater(() -> p.setClan(clan)),
 			this::loadError);
-		api.fetchLeaderboard(config.leaderboardSize(),
-			entries -> SwingUtilities.invokeLater(() -> p.setLeaderboard(entries)),
+		LeaderboardPeriod period = config.leaderboardPeriod();
+		api.fetchLeaderboard(config.leaderboardSize(), period.getDays(),
+			entries -> SwingUtilities.invokeLater(() -> p.setLeaderboard(entries, period)),
 			this::loadError);
 		api.fetchRecentSplits(RECENT_SPLITS,
 			splits -> SwingUtilities.invokeLater(() -> p.setRecentSplits(splits)),

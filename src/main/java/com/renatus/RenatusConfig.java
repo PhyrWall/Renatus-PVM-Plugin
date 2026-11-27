@@ -89,4 +89,15 @@ public interface RenatusConfig extends Config
 	{
 		return 10;
 	}
+
+	@ConfigItem(
+			keyName = "leaderboardPeriod",
+			name = "Leaderboard period",
+			description = "Which splits the leaderboard tab counts: all time, or only the last 30 or 7 days",
+			position = 8
+	)
+	default LeaderboardPeriod leaderboardPeriod()
+	{
+		return LeaderboardPeriod.THIRTY_DAYS;
+	}
 }

@@ -79,8 +79,8 @@ class RenatusPanel extends PluginPanel
 	private final JPanel profilePanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
 	private final JPanel clanPanel = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
 	private final JPanel leaderboardList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
+	private MaterialTab leaderboardTab;
 	private final JPanel recentList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
-	private final JPanel ranksList = new JPanel(new DynamicGridLayout(0, 1, 0, 2));
 	private final JPanel broadcastList = new JPanel(new DynamicGridLayout(0, 1, 0, 4));
 	/** The "Notifications" box; only in the panel while there are broadcasts to show. */
 	private JComponent broadcastSection;
@@ -102,7 +102,6 @@ class RenatusPanel extends PluginPanel
 	private boolean ownLoaded;
 	private String lookupName;
 	private PlayerProfile lookupProfile;
-	private List<Rank> ranks = Collections.emptyList();
 	// Profile splits whose participant list is open; kept across refreshes.
 	private final Set<String> expandedSplits = new HashSet<>();
 	// Set when loading failed; drops late results until the next load starts.
@@ -206,15 +205,14 @@ class RenatusPanel extends PluginPanel
 		JPanel tabDisplay = new JPanel(new BorderLayout());
 		tabDisplay.setOpaque(false);
 		MaterialTabGroup tabs = new MaterialTabGroup(tabDisplay);
-		tabs.setLayout(new GridLayout(1, 3, 4, 4));
-		MaterialTab leaderboardTab = new MaterialTab("Top", tabs, leaderboardList);
+		tabs.setLayout(new GridLayout(1, 2, 4, 4));
+		leaderboardTab = new MaterialTab(LeaderboardPeriod.ALL_TIME.getTabLabel(), tabs, leaderboardList);
 		tabs.addTab(leaderboardTab);
 		tabs.addTab(new MaterialTab("Recent", tabs, recentList));
-		tabs.addTab(new MaterialTab("Ranks", tabs, ranksList));
 		tabs.select(leaderboardTab);
 		add(section("Clan Activity", tabs, tabDisplay));
 
-		for (JPanel list : new JPanel[]{leaderboardList, recentList, ranksList})
+		for (JPanel list : new JPanel[]{leaderboardList, recentList})
 		{
 			list.setOpaque(false);
 		}
@@ -326,14 +324,13 @@ class RenatusPanel extends PluginPanel
 		showMessage(message);
 	}
 
-	/** Empties the profile, clan stats, and the leaderboard, recent and ranks tabs. */
+	/** Empties the profile, clan stats, and the leaderboard and recent tabs. */
 	void clearData()
 	{
 		ownProfile = null;
 		ownLoaded = false;
 		lookupName = null;
 		lookupProfile = null;
-		ranks = Collections.emptyList();
 		expandedSplits.clear();
 		members = Collections.emptyList();
 		searchField.setText("");
@@ -343,7 +340,6 @@ class RenatusPanel extends PluginPanel
 		leaderboardList.removeAll();
 		recentList.removeAll();
 		renderProfile();
-		renderRanks();
 		revalidate();
 		repaint();
 	}
@@ -476,19 +472,19 @@ class RenatusPanel extends PluginPanel
 			discordButton.setToolTipText("Open the clan Discord channel");
 			discordButton.addActionListener(e -> LinkBrowser.browse(DISCORD_URL));
 			clanPanel.add(discordButton);
-			ranks = clan.getRanks() != null ? clan.getRanks() : Collections.emptyList();
-			renderRanks();
 		}
 		revalidate();
 		repaint();
 	}
 
-	void setLeaderboard(@Nullable List<LeaderboardEntry> entries)
+	void setLeaderboard(@Nullable List<LeaderboardEntry> entries, LeaderboardPeriod period)
 	{
 		if (loadFailed)
 		{
 			return;
 		}
+		leaderboardTab.setText(period.getTabLabel());
+		leaderboardTab.setToolTipText("Splits from " + (period.getDays() > 0 ? "the last " + period.getDays() + " days" : "all time"));
 		leaderboardList.removeAll();
 		if (entries != null)
 		{
@@ -732,7 +728,6 @@ class RenatusPanel extends PluginPanel
 			renderProfileBody(profile);
 		}
 
-		renderRanks();
 		profilePanel.revalidate();
 		profilePanel.repaint();
 	}
@@ -800,47 +795,6 @@ class RenatusPanel extends PluginPanel
 				profilePanel.add(recentSplitEntry(split));
 			}
 		}
-	}
-
-	private void renderRanks()
-	{
-		ranksList.removeAll();
-		PlayerProfile shown = lookupName != null ? lookupProfile : ownProfile;
-		Rank currentRank = shown != null ? shown.getRank() : null;
-		String current = currentRank != null ? currentRank.getName() : null;
-		for (Rank rank : ranks)
-		{
-			// Ranks below the one shown are already behind them: list only the current rank and up.
-			if (currentRank != null && isBelow(rank, currentRank))
-			{
-				continue;
-			}
-			String detail = gp(rank.getGpRequired()) + " gp · " + rank.getDaysRequired() + " days";
-			JPanel row = row(null, rank.getName(), detail, "");
-			if (rank.getName().equals(current))
-			{
-				row.setBorder(BorderFactory.createCompoundBorder(
-					BorderFactory.createMatteBorder(0, 3, 0, 0, GOLD),
-					new EmptyBorder(4, 5, 4, 6)));
-			}
-			ranksList.add(row);
-		}
-		ranksList.revalidate();
-		ranksList.repaint();
-	}
-
-	/** Whether {@code rank} sits below {@code current}: lower gp requirement, or equal gp and fewer days. */
-	private static boolean isBelow(Rank rank, Rank current)
-	{
-		if (rank.getName().equals(current.getName()))
-		{
-			return false;
-		}
-		if (rank.getGpRequired() != current.getGpRequired())
-		{
-			return rank.getGpRequired() < current.getGpRequired();
-		}
-		return rank.getDaysRequired() < current.getDaysRequired();
 	}
 
 	// -- component helpers ----------------------------------------------------
